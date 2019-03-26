@@ -108,7 +108,7 @@ def stream_learn():
         roll_avg_error_dict[states.time]=(np.mean(list(error_dict.values()))+list(roll_avg_error_dict.values())[-1])/2
         roll_std_error_dict[states.time]=(np.std(list(error_dict.values()))+list(roll_std_error_dict.values())[-1])/2
 
-        std_error=roll_std_error_dict[states.time]
+        std_error=roll_std_error_dict[states.time]+roll_avg_error_dict[states.time]
 
        
         #create dict for anomae
@@ -143,7 +143,7 @@ def plot_stuff():
     #p.y_range.follow="end"
     #p.y_range.follow_interval = 20
     #p.y_range.range_padding=0
-    p.y_range = Range1d(0, 3500)
+    p.y_range = Range1d(0, 1000)
     p.yaxis.axis_label = "Rolling AVG Error"
 
     r1 = p.line([], [], color="firebrick", line_width=2)
@@ -166,7 +166,7 @@ def plot_stuff():
     #p.y_range.follow="end"
     #p.y_range.follow_interval = 20
     #p.y_range.range_padding=0
-    p2.y_range = Range1d(0, 500)
+    p2.y_range = Range1d(0, 1000)
     p2.yaxis.axis_label = "Anomaly Count"
 
     r2 = p2.line([], [], color="#1D91C0", line_width=2)
@@ -183,15 +183,15 @@ def plot_stuff():
         global roll_avg_error_dict
         
         current_error=list(roll_avg_error_dict.values())[-1]
-        ds2.data['x'].append(step*10)
-        ds2.data['y'].append(current_error)
-        ds2.trigger('data', ds2.data, ds2.data,)
+        ds1.data['x'].append(step*10)
+        ds1.data['y'].append(current_error)
+        ds1.trigger('data', ds1.data, ds1.data,)
 
         global ANOMALY_DICT
         error_d=list(ANOMALY_DICT.values())[-1]
-        ds1.data['x'].append(step*10)
-        ds1.data['y'].append(len(error_d.values()))
-        ds1.trigger('data', ds1.data, ds1.data)
+        ds2.data['x'].append(step*10)
+        ds2.data['y'].append(len(error_d.values()))
+        ds2.trigger('data', ds2.data, ds2.data)
 
 
         

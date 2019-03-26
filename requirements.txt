@@ -1,0 +1,4 @@
+numpy==1.15.4
+opensky_api.egg==info
+bokeh==1.0.4
+scikit_learn==0.20.3

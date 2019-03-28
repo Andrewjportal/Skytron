@@ -19,6 +19,7 @@ import time
 import pprint
 from sklearn.externals import joblib
 import pickle
+import math
 
 
 api = OpenSkyApi()
@@ -29,26 +30,7 @@ roll_avg_error_dict={}
 model = MLPRegressor()
 
 
-
-def fix_dicts():
-    global sky_dict
-    global dict_sky
-    
-    sd_keys=set(sky_dict.keys())
-    ds_keys=set(dict_sky.keys())
-
-    if not sd_keys.issubset(ds_keys):
-        mis_keys = sd_keys-ds_keys
-        for mis_key in mis_keys:
-            dict_sky[f'{mis_key}']=(0,0,0,0,0)
-            
-    if not ds_keys.issubset(sd_keys):
-        mis_keys = ds_keys-sd_keys
-        for mis_key in mis_keys:
-            sky_dict[f'{mis_key}']=(0,0,0,0,0)
-
-
-sky_dict={}
+#Create intial dicts step before loop
 states= api.get_states()
 
 for s in states.states:
@@ -57,49 +39,80 @@ for s in states.states:
     sky_dict[f'{s.icao24}']= vector
 
 
+time.sleep(10)
+states = api.get_states()
+#get new dict_sky
+for s in states.states:
+    vector=(s.longitude, s.latitude, s.geo_altitude, s.velocity, s.heading)
+    vector=[0 if x==None else x for x in vector]
+    dict_sky[f'{s.icao24}']=vector
+
 
 def stream_learn():
     global sky_dict
     global dict_sky
     global roll_avg_error_dict
-     #Create dict for anomaly_dict at timestamp
     global ANOMALY_DICT
     global model
+
+   
     while True: 
 
-        time.sleep(10)
-        states = api.get_states()
-        #get another dict
-        for s in states.states:
-            vector=(s.longitude, s.latitude, s.geo_altitude, s.velocity, s.heading)
-            vector=[0 if x==None else x for x in vector]
-            dict_sky[f'{s.icao24}']=vector
-
-
-        fix_dicts()
+        # sky_dict is old ; dict_sky is new
 
         sd_keys=set(sky_dict.keys())
         ds_keys=set(dict_sky.keys())
 
+        # Check if all items in sd_keys are in ds_keys; if not match dict_keys with zero value
+        if not sd_keys.issubset(ds_keys):
+            mis_keys = sd_keys-ds_keys
+            for mis_key in mis_keys:
+                dict_sky[f'{mis_key}']=(0,0,0,0,0)
+            
+        #Check if all items in ds_keys are in sd_keys: if not match dict_keys with zero value
+        if not ds_keys.issubset(sd_keys):
+            mis_keys = ds_keys-sd_keys
+            for mis_key in mis_keys:
+                sky_dict[f'{mis_key}']=(0,0,0,0,0)
         
+        #if a key has a zero vector in both dicts; remove so model error is not driven down #
+        # *can't get it to work ignore for now cuz it doesn't break it just makes model worse
+        """
+        for key in list(sky_dict.keys()):
+            if sky_dict[key]==dict_sky[key]:
+                del sky_dict[key]
+                del dict_sky[key]
+        """
+        
+        #Partial fit; model learns
         for key in sd_keys:
             X=np.asarray(sky_dict[key]).reshape(1,-1)
             Y=np.asarray(dict_sky[key]).reshape(1,-1)
             model.partial_fit(X,Y)
+            y=model.predict(Y)
 
+        time.sleep(10)
+        #Get new states
+        states = api.get_states()
+
+        # Set sky_dict to dict_sky
+        sky_dict=dict_sky
+        #Overwrite dict_sky with new set of vectors to evaluate model prediction
+        
+        for s in states.states:
+            vector=(s.longitude, s.latitude, s.geo_altitude, s.velocity, s.heading)
+            vector=[0 if x==None else x for x in vector]
+            dict_sky[f'{s.icao24}']= vector
+        
+                
+        #Get error of prediction y
         error_dict={}
         for key in sd_keys:
-            X=np.asarray(sky_dict[key]).reshape(1,-1)
+            #need new Y to eval model.
             Y=np.asarray(dict_sky[key]).reshape(1,-1)
-            y=model.predict(X)
-            error_dict[key]=mean_squared_error(Y,y)
+            error_dict[key]=math.sqrt(mean_squared_error(Y,y))
 
-
-
-        time_error_dict={}
-        time_error_dict[states.time]=error_dict
-
-        
+    
         roll_avg_error_dict[states.time]=np.mean(list(error_dict.values()))
 
         roll_std_error_dict={}
@@ -108,17 +121,18 @@ def stream_learn():
         roll_avg_error_dict[states.time]=(np.mean(list(error_dict.values()))+list(roll_avg_error_dict.values())[-1])/2
         roll_std_error_dict[states.time]=(np.std(list(error_dict.values()))+list(roll_std_error_dict.values())[-1])/2
 
-        std_error=roll_std_error_dict[states.time]+roll_avg_error_dict[states.time]
+        std_error=(roll_std_error_dict[states.time]*2)+roll_avg_error_dict[states.time]
 
        
-        #create dict for anomae
+        #create dict for anomalies
         anomaly_dict={}
         for key in error_dict:
             if error_dict[key]>std_error:
                 anomaly_dict[key]=error_dict[key]
         ANOMALY_DICT[states.time]=anomaly_dict
 
-        sky_dict=dict_sky
+        # At this sky_dict is old dict_sky new... loop to top
+        
     
 
 
@@ -143,7 +157,7 @@ def plot_stuff():
     #p.y_range.follow="end"
     #p.y_range.follow_interval = 20
     #p.y_range.range_padding=0
-    p.y_range = Range1d(0, 1000)
+    p.y_range = Range1d(0, 4000)
     p.yaxis.axis_label = "Rolling AVG Error"
 
     r1 = p.line([], [], color="firebrick", line_width=2)
@@ -166,7 +180,7 @@ def plot_stuff():
     #p.y_range.follow="end"
     #p.y_range.follow_interval = 20
     #p.y_range.range_padding=0
-    p2.y_range = Range1d(0, 1000)
+    p2.y_range = Range1d(0, 2000)
     p2.yaxis.axis_label = "Anomaly Count"
 
     r2 = p2.line([], [], color="#1D91C0", line_width=2)
